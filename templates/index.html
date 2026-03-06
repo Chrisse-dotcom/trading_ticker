@@ -601,6 +601,110 @@
     }
     .demo-banner.hidden { display: none; }
 
+    /* ── Settings ───────────────────────────────────────────── */
+    .settings-btn {
+      background: none; border: 1px solid var(--border);
+      color: var(--muted); border-radius: 8px;
+      padding: 6px 10px; cursor: pointer; font-size: 16px;
+      transition: all .15s; flex-shrink: 0; line-height: 1;
+    }
+    .settings-btn:hover { color: var(--text); border-color: var(--accent); background: var(--card); }
+
+    .settings-overlay {
+      position: fixed; inset: 0;
+      background: rgba(0,0,0,.55);
+      z-index: 900;
+      opacity: 0; pointer-events: none;
+      transition: opacity .2s;
+    }
+    .settings-overlay.open { opacity: 1; pointer-events: all; }
+
+    .settings-modal {
+      position: fixed; top: 0; right: 0;
+      width: 360px; max-width: 100vw;
+      height: 100vh; overflow-y: auto;
+      background: var(--surface);
+      border-left: 1px solid var(--border);
+      z-index: 901;
+      transform: translateX(100%);
+      transition: transform .25s cubic-bezier(.4,0,.2,1);
+      padding: 24px;
+    }
+    .settings-modal.open { transform: translateX(0); }
+
+    .settings-hd {
+      display: flex; align-items: center; justify-content: space-between;
+      margin-bottom: 24px;
+    }
+    .settings-hd h2 { font-size: 17px; font-weight: 800; }
+    .settings-close {
+      background: none; border: none; color: var(--muted);
+      font-size: 20px; cursor: pointer; padding: 4px; line-height: 1;
+    }
+    .settings-close:hover { color: var(--text); }
+
+    .settings-section { margin-bottom: 24px; }
+    .settings-section-title {
+      font-size: 10px; font-weight: 700; letter-spacing: .8px;
+      text-transform: uppercase; color: var(--muted);
+      margin-bottom: 12px;
+    }
+
+    .market-checkboxes { display: flex; flex-direction: column; gap: 8px; }
+    .market-cb-row {
+      display: flex; align-items: center; gap: 10px;
+      padding: 10px 12px;
+      background: var(--card); border: 1px solid var(--border);
+      border-radius: 9px; cursor: pointer;
+      transition: border-color .15s;
+      user-select: none;
+    }
+    .market-cb-row:hover { border-color: var(--accent); }
+    .market-cb-row input { accent-color: var(--accent); width: 16px; height: 16px; cursor: pointer; }
+    .market-cb-label { font-size: 14px; font-weight: 500; flex: 1; }
+    .market-cb-src { font-size: 11px; color: var(--muted); }
+
+    .settings-all-btn {
+      margin-top: 8px; width: 100%;
+      padding: 8px; border-radius: 8px;
+      border: 1px solid var(--border); background: var(--card);
+      color: var(--muted); font-size: 12px; font-weight: 600;
+      cursor: pointer; transition: all .15s;
+    }
+    .settings-all-btn:hover { border-color: var(--accent); color: var(--accent); background: var(--card-h); }
+
+    .source-card {
+      background: var(--card); border: 1px solid var(--border);
+      border-radius: 9px; padding: 12px 14px; margin-bottom: 8px;
+    }
+    .source-card-hd {
+      display: flex; align-items: center; gap: 8px; margin-bottom: 6px;
+    }
+    .source-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+    .source-name { font-size: 13px; font-weight: 700; }
+    .source-badge {
+      margin-left: auto; font-size: 10px; font-weight: 700;
+      padding: 2px 7px; border-radius: 4px;
+      background: var(--up-bg); color: var(--up); border: 1px solid var(--up);
+    }
+    .source-desc { font-size: 11px; color: var(--muted); line-height: 1.5; }
+    .source-tag {
+      display: inline-block;
+      padding: 2px 7px; border-radius: 4px; font-size: 10px; font-weight: 600;
+      background: var(--accent-bg); color: var(--accent); border: 1px solid var(--accent);
+      margin-right: 4px; margin-top: 4px;
+    }
+
+    .currency-toggle { display: flex; gap: 6px; margin-top: 10px; }
+    .cur-btn {
+      flex: 1; padding: 7px; border-radius: 7px;
+      border: 1px solid var(--border); background: var(--card);
+      color: var(--muted); font-size: 13px; font-weight: 600;
+      cursor: pointer; text-align: center; transition: all .15s;
+    }
+    .cur-btn:hover { border-color: var(--accent); color: var(--accent); }
+    .cur-btn.active { background: var(--accent-bg); border-color: var(--accent); color: var(--accent); }
+
     /* ── Responsive ─────────────────────────────────────────── */
     @media (max-width: 900px) {
       .content { grid-template-columns: 1fr; }
@@ -641,7 +745,8 @@
     <div class="live-dot"></div>
     Update <span id="countdown">60</span>s
   </div>
-  <div style="font-size:10px;color:var(--muted);white-space:nowrap">v2.1</div>
+  <button class="settings-btn" onclick="openSettings()" title="Einstellungen">⚙</button>
+  <div style="font-size:10px;color:var(--muted);white-space:nowrap">v2.2</div>
 </header>
 
 <!-- ── Demo Banner ────────────────────────────────────────────────── -->
@@ -686,6 +791,83 @@
     </div>
   </div>
 
+</div>
+
+<!-- ── Settings Overlay ────────────────────────────────────────── -->
+<div id="settingsOverlay" class="settings-overlay" onclick="closeSettings()"></div>
+
+<!-- ── Settings Modal ─────────────────────────────────────────── -->
+<div id="settingsModal" class="settings-modal">
+  <div class="settings-hd">
+    <h2>⚙ Einstellungen</h2>
+    <button class="settings-close" onclick="closeSettings()">✕</button>
+  </div>
+
+  <!-- Märkte -->
+  <div class="settings-section">
+    <div class="settings-section-title">Märkte anzeigen</div>
+    <div class="market-checkboxes">
+      <label class="market-cb-row">
+        <input type="checkbox" id="cb_stocks" onchange="applyMarketSettings()">
+        <span class="market-cb-label">Aktien</span>
+        <span class="market-cb-src">Yahoo Finance</span>
+      </label>
+      <label class="market-cb-row">
+        <input type="checkbox" id="cb_etfs" onchange="applyMarketSettings()">
+        <span class="market-cb-label">ETFs</span>
+        <span class="market-cb-src">Yahoo Finance</span>
+      </label>
+      <label class="market-cb-row">
+        <input type="checkbox" id="cb_commodities" onchange="applyMarketSettings()">
+        <span class="market-cb-label">Rohstoffe</span>
+        <span class="market-cb-src">Yahoo Finance</span>
+      </label>
+      <label class="market-cb-row">
+        <input type="checkbox" id="cb_crypto" onchange="applyMarketSettings()">
+        <span class="market-cb-label">Krypto</span>
+        <span class="market-cb-src">CoinGecko</span>
+      </label>
+    </div>
+    <button class="settings-all-btn" onclick="selectAllMarkets()">Alle auswählen</button>
+  </div>
+
+  <!-- Datenquellen -->
+  <div class="settings-section">
+    <div class="settings-section-title">Datenquellen</div>
+
+    <div class="source-card">
+      <div class="source-card-hd">
+        <div class="source-dot" style="background:#4d8cff"></div>
+        <div class="source-name">Yahoo Finance</div>
+        <div class="source-badge">Kostenlos</div>
+      </div>
+      <div class="source-desc">Echtzeit-Kurse, historische Daten und Nachrichten. Keine Anmeldung erforderlich.</div>
+      <div>
+        <span class="source-tag">Aktien</span>
+        <span class="source-tag">ETFs</span>
+        <span class="source-tag">Rohstoffe</span>
+      </div>
+    </div>
+
+    <div class="source-card">
+      <div class="source-card-hd">
+        <div class="source-dot" style="background:#00e676"></div>
+        <div class="source-name">CoinGecko</div>
+        <div class="source-badge">Kostenlos</div>
+      </div>
+      <div class="source-desc">Umfassende Kryptodaten mit Marktkapitalisierung, Volumen und Sparklines.</div>
+      <div>
+        <span class="source-tag">Krypto</span>
+      </div>
+      <div style="margin-top:12px">
+        <div style="font-size:11px;color:var(--muted);margin-bottom:6px">Anzeigewährung für Krypto:</div>
+        <div class="currency-toggle">
+          <button class="cur-btn" id="curEur" onclick="setCryptoCurrency('eur')">EUR €</button>
+          <button class="cur-btn" id="curUsd" onclick="setCryptoCurrency('usd')">USD $</button>
+        </div>
+      </div>
+    </div>
+  </div>
 </div>
 
 <script>
@@ -1068,15 +1250,110 @@ function renderDetail(a) {
   </div>`;
 }
 
+/* ── Settings ───────────────────────────────────────────────────── */
+const SETTINGS_KEY = 'mt_settings_v1';
+const DEFAULT_SETTINGS = {
+  markets: { stocks: true, etfs: true, commodities: true, crypto: true },
+  cryptoCurrency: 'eur',
+};
+
+function getSettings() {
+  try {
+    const stored = JSON.parse(localStorage.getItem(SETTINGS_KEY) || '{}');
+    return {
+      ...DEFAULT_SETTINGS,
+      ...stored,
+      markets: { ...DEFAULT_SETTINGS.markets, ...(stored.markets || {}) },
+    };
+  } catch { return { ...DEFAULT_SETTINGS }; }
+}
+
+function saveSettings(s) { localStorage.setItem(SETTINGS_KEY, JSON.stringify(s)); }
+
+function openSettings() {
+  document.getElementById('settingsOverlay').classList.add('open');
+  document.getElementById('settingsModal').classList.add('open');
+  syncSettingsUI();
+}
+
+function closeSettings() {
+  document.getElementById('settingsOverlay').classList.remove('open');
+  document.getElementById('settingsModal').classList.remove('open');
+}
+
+function syncSettingsUI() {
+  const s = getSettings();
+  ['stocks', 'etfs', 'commodities', 'crypto'].forEach(m => {
+    const cb = document.getElementById(`cb_${m}`);
+    if (cb) cb.checked = s.markets[m] !== false;
+  });
+  document.getElementById('curEur').classList.toggle('active', s.cryptoCurrency !== 'usd');
+  document.getElementById('curUsd').classList.toggle('active', s.cryptoCurrency === 'usd');
+}
+
+function applyMarketSettings() {
+  const s = getSettings();
+  ['stocks', 'etfs', 'commodities', 'crypto'].forEach(m => {
+    const cb = document.getElementById(`cb_${m}`);
+    if (cb) s.markets[m] = cb.checked;
+  });
+  // Ensure at least one market stays visible
+  const anyChecked = Object.values(s.markets).some(v => v);
+  if (!anyChecked) {
+    ['stocks', 'etfs', 'commodities', 'crypto'].forEach(m => {
+      s.markets[m] = true;
+      const cb = document.getElementById(`cb_${m}`);
+      if (cb) cb.checked = true;
+    });
+  }
+  saveSettings(s);
+  applyTabVisibility(s);
+}
+
+function applyTabVisibility(s) {
+  document.querySelectorAll('.tab').forEach(tab => {
+    tab.style.display = s.markets[tab.dataset.market] !== false ? '' : 'none';
+  });
+  // Switch away if current market was hidden
+  if (s.markets[S.market] === false) {
+    const first = ['stocks', 'etfs', 'commodities', 'crypto'].find(m => s.markets[m] !== false);
+    if (first) document.querySelector(`.tab[data-market="${first}"]`)?.click();
+  }
+}
+
+function selectAllMarkets() {
+  const s = getSettings();
+  ['stocks', 'etfs', 'commodities', 'crypto'].forEach(m => {
+    s.markets[m] = true;
+    const cb = document.getElementById(`cb_${m}`);
+    if (cb) cb.checked = true;
+  });
+  saveSettings(s);
+  applyTabVisibility(s);
+}
+
+function setCryptoCurrency(cur) {
+  const s = getSettings();
+  s.cryptoCurrency = cur;
+  saveSettings(s);
+  document.getElementById('curEur').classList.toggle('active', cur === 'eur');
+  document.getElementById('curUsd').classList.toggle('active', cur === 'usd');
+  if (S.market === 'crypto') loadTops(false);
+}
+
 /* ── Load Tops ──────────────────────────────────────────────────── */
 async function loadTops(skeleton = true) {
   if (skeleton) renderSkeletons();
   updateTopsHeader();
   try {
     const wl  = getMktWL(S.market);
-    const url = wl.length
+    const settings = getSettings();
+    let url = wl.length
       ? `/api/tops/${S.market}?symbols=${encodeURIComponent(wl.join(','))}`
       : `/api/tops/${S.market}`;
+    if (S.market === 'crypto' && settings.cryptoCurrency === 'usd') {
+      url += (url.includes('?') ? '&' : '?') + 'currency=usd';
+    }
     const res  = await fetch(url);
     const data = await res.json();
     if (!Array.isArray(data) || !data.length) {
@@ -1375,6 +1652,7 @@ function startCountdown() {
 }
 
 /* ── Init ───────────────────────────────────────────────────────── */
+applyTabVisibility(getSettings());
 loadTops();
 startCountdown();
 </script>

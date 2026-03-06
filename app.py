@@ -258,9 +258,10 @@ def _demo_yahoo(symbol: str) -> dict | None:
 
 
 # ── CoinGecko ─────────────────────────────────────────────────────────────────
-def coingecko_tops(ids=None) -> list:
+def coingecko_tops(ids=None, currency: str = "eur") -> list:
     id_list = ids or CRYPTO_DEFAULT
-    key = "cg_tops_" + ",".join(id_list)
+    cur = currency.lower() if currency.lower() in ("eur", "usd") else "eur"
+    key = f"cg_tops_{cur}_" + ",".join(id_list)
     cached = cache_get(key)
     if cached:
         return cached
@@ -269,7 +270,7 @@ def coingecko_tops(ids=None) -> list:
             "https://api.coingecko.com/api/v3/coins/markets",
             headers=HEADERS,
             params={
-                "vs_currency": "eur",
+                "vs_currency": cur,
                 "ids": ",".join(id_list),
                 "sparkline": "true",
                 "price_change_percentage": "24h,7d,30d",
@@ -287,7 +288,7 @@ def coingecko_tops(ids=None) -> list:
                 "id":         c["id"],
                 "name":       c["name"],
                 "price":      price,
-                "currency":   "EUR",
+                "currency":   cur.upper(),
                 "change_24h": round(float(c.get("price_change_percentage_24h") or 0), 2),
                 "change_7d":  round(float(c.get("price_change_percentage_7d_in_currency") or 0), 2),
                 "change_30d": round(float(c.get("price_change_percentage_30d_in_currency") or 0), 2),
@@ -301,7 +302,7 @@ def coingecko_tops(ids=None) -> list:
         cache_set(key, result)
         return result
     except Exception:
-        return _demo_crypto(id_list)
+        return _demo_crypto(id_list, cur)
 
 
 CRYPTO_DEMO_DATA = {
@@ -316,12 +317,15 @@ CRYPTO_DEMO_DATA = {
 }
 
 
-def _demo_crypto(ids=None) -> list:
+def _demo_crypto(ids=None, currency: str = "eur") -> list:
+    cur = currency.upper()
+    usd_factor = 1.08  # approximate EUR→USD
     result = []
     for coin_id in (ids or CRYPTO_DEFAULT):
         if coin_id not in CRYPTO_DEMO_DATA:
             continue
-        sym, name, price, mcap = CRYPTO_DEMO_DATA[coin_id]
+        sym, name, price_eur, mcap = CRYPTO_DEMO_DATA[coin_id]
+        price = round(price_eur * usd_factor, 6) if cur == "USD" else price_eur
         random.seed(hash(coin_id) % 9999)
         spark  = _make_sparkline(price * 0.9, days=20, volatility=0.03)
         c24h   = round(random.uniform(-5.0, 6.0), 2)
@@ -333,7 +337,7 @@ def _demo_crypto(ids=None) -> list:
             "id":         coin_id,
             "name":       name,
             "price":      price,
-            "currency":   "EUR",
+            "currency":   cur,
             "change_24h": c24h,
             "change_7d":  c7d,
             "change_30d": c30d,
@@ -802,7 +806,8 @@ def api_tops(market):
     symbols_param = request.args.get("symbols", "").strip()
     if market == "crypto":
         ids = [s.strip() for s in symbols_param.split(",") if s.strip()] if symbols_param else None
-        return jsonify(coingecko_tops(ids))
+        currency = request.args.get("currency", "eur")
+        return jsonify(coingecko_tops(ids, currency))
     custom = [s.strip() for s in symbols_param.split(",") if s.strip()]
     syms = custom or MARKET_SYMBOLS.get(market)
     if not syms:
