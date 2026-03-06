@@ -432,10 +432,345 @@ def _demo_news(query: str) -> list:
     return result
 
 
+# ── OHLCV / Candlestick Data ───────────────────────────────────────────────────
+def fetch_ohlcv_yahoo(symbol: str, interval: str = "1d", period: str = "3mo") -> list:
+    cached = cache_get(f"ohlcv_{symbol}")
+    if cached:
+        return cached
+    try:
+        r = requests.get(
+            f"https://query1.finance.yahoo.com/v8/finance/chart/{symbol}",
+            headers=HEADERS,
+            params={"interval": interval, "range": period},
+            timeout=9,
+        )
+        chart = r.json()["chart"]["result"][0]
+        ts    = chart.get("timestamp", [])
+        q     = chart["indicators"]["quote"][0]
+        opens  = q.get("open",   [])
+        highs  = q.get("high",   [])
+        lows   = q.get("low",    [])
+        closes = q.get("close",  [])
+        vols   = q.get("volume", [None] * len(ts))
+
+        candles = []
+        for i, t in enumerate(ts):
+            o, h, l, c, v = opens[i], highs[i], lows[i], closes[i], vols[i]
+            if all(x is not None for x in [o, h, l, c]):
+                candles.append({
+                    "t": t,
+                    "o": round(o, 6), "h": round(h, 6),
+                    "l": round(l, 6), "c": round(c, 6),
+                    "v": int(v or 0),
+                })
+        cache_set(f"ohlcv_{symbol}", candles)
+        return candles
+    except Exception:
+        return _demo_ohlcv(symbol)
+
+
+def fetch_ohlcv_crypto(coin_id: str, days: int = 30) -> list:
+    cached = cache_get(f"ohlcv_cg_{coin_id}")
+    if cached:
+        return cached
+    try:
+        r = requests.get(
+            f"https://api.coingecko.com/api/v3/coins/{coin_id}/ohlc",
+            headers=HEADERS,
+            params={"vs_currency": "eur", "days": days},
+            timeout=10,
+        )
+        candles = [
+            {"t": d[0] // 1000, "o": d[1], "h": d[2], "l": d[3], "c": d[4], "v": 0}
+            for d in r.json()
+        ]
+        cache_set(f"ohlcv_cg_{coin_id}", candles)
+        return candles
+    except Exception:
+        return _demo_ohlcv_crypto(coin_id)
+
+
+def _demo_ohlcv(symbol: str) -> list:
+    base_prices = {
+        "AAPL": 195.89, "MSFT": 415.26, "NVDA": 875.39, "GOOGL": 171.94,
+        "AMZN": 183.75, "TSLA": 177.48, "META": 510.23, "JPM":   196.33,
+        "SPY":  524.85, "QQQ":  440.70, "VTI":  240.12, "IWM":   198.44,
+        "GLD":  214.63, "TLT":   92.18, "ARKK":  46.72, "XLF":    41.25,
+        "GC=F": 2328.40, "SI=F":  27.45, "CL=F":  78.62, "NG=F":   2.18,
+        "HG=F":    4.51, "ZW=F": 560.25, "ZC=F": 449.50, "BZ=F":  82.14,
+    }
+    base = base_prices.get(symbol, 100.0)
+    return _gen_ohlcv(base, volatility=0.015, seed=hash(symbol) % 9999)
+
+
+def _demo_ohlcv_crypto(coin_id: str) -> list:
+    base_prices = {
+        "bitcoin": 67850.0, "ethereum": 3542.0, "solana": 185.4,
+        "binancecoin": 607.2, "ripple": 0.626, "cardano": 0.483,
+        "dogecoin": 0.172, "avalanche-2": 39.8,
+    }
+    base = base_prices.get(coin_id, 1.0)
+    return _gen_ohlcv(base, volatility=0.03, seed=hash(coin_id) % 9999 + 1)
+
+
+def _gen_ohlcv(base: float, days: int = 45, volatility: float = 0.02, seed: int = 42) -> list:
+    """Generate realistic demo OHLCV candlestick data."""
+    random.seed(seed)
+    now   = int(time.time())
+    start = now - days * 86400
+    price = base * 0.88
+    candles = []
+    for i in range(days):
+        drift  = random.gauss(0.0005, volatility)
+        open_p = price
+        close_p = price * (1 + drift)
+        wick_range = abs(close_p - open_p) * random.uniform(0.3, 1.2)
+        high_p  = max(open_p, close_p) + wick_range * random.uniform(0.1, 0.7)
+        low_p   = min(open_p, close_p) - wick_range * random.uniform(0.1, 0.7)
+        candles.append({
+            "t": start + i * 86400,
+            "o": round(open_p,  6), "h": round(high_p,  6),
+            "l": round(low_p,   6), "c": round(close_p, 6),
+            "v": int(random.uniform(1e6, 50e6)),
+        })
+        price = close_p
+    return candles
+
+
+# ── Candlestick Pattern Detection ──────────────────────────────────────────────
+def detect_patterns(candles: list) -> list:
+    """
+    Detect common candlestick patterns in the last ~10 candles.
+    Returns a list of detected patterns with index, name, signal, desc.
+    """
+    patterns = []
+    n = len(candles)
+    if n < 2:
+        return patterns
+
+    for i in range(1, n):
+        c    = candles[i]
+        prev = candles[i - 1]
+        body       = abs(c["c"] - c["o"])
+        total      = c["h"] - c["l"] or 1e-9
+        upper_w    = c["h"] - max(c["o"], c["c"])
+        lower_w    = min(c["o"], c["c"]) - c["l"]
+        is_bull    = c["c"] >= c["o"]
+        body_ratio = body / total
+
+        prev_body  = abs(prev["c"] - prev["o"])
+        prev_bull  = prev["c"] >= prev["o"]
+
+        # Only annotate recent candles (last 10) to avoid clutter
+        if i < n - 10:
+            continue
+
+        name = sig = desc = None
+
+        # ── Single-candle patterns ─────────────────────────────────────
+        if body_ratio < 0.08:
+            name = "Doji"
+            sig  = "neutral"
+            desc = "Unentschlossenheit im Markt – mögliche Trendwende"
+
+        elif lower_w > 2.0 * body and upper_w < body * 0.5:
+            if not prev_bull:
+                name, sig = "Hammer", "bullish"
+                desc = "Käufer drücken Kurs nach oben – Aufwärtswende möglich"
+            else:
+                name, sig = "Hängender Mann", "bearish"
+                desc = "Warnsignal: Verkaufsdruck trotz Aufwärtstrend"
+
+        elif upper_w > 2.0 * body and lower_w < body * 0.5:
+            if prev_bull:
+                name, sig = "Shooting Star", "bearish"
+                desc = "Abstoßung von oben – Abwärtswende wahrscheinlich"
+            else:
+                name, sig = "Inv. Hammer", "bullish"
+                desc = "Mögliche Kaufwelle nach Abwärtstrend"
+
+        elif body_ratio > 0.85:
+            if is_bull:
+                name, sig = "Bull. Marubozu", "bullish"
+                desc = "Starke Käufer – klarer Aufwärtstrend"
+            else:
+                name, sig = "Bear. Marubozu", "bearish"
+                desc = "Starke Verkäufer – klarer Abwärtstrend"
+
+        # ── Two-candle patterns ────────────────────────────────────────
+        elif is_bull and not prev_bull and body > prev_body * 1.05:
+            name, sig = "Bull. Engulfing", "bullish"
+            desc = "Käufer übernehmen vollständig – starkes Umkehrsignal"
+
+        elif not is_bull and prev_bull and body > prev_body * 1.05:
+            name, sig = "Bear. Engulfing", "bearish"
+            desc = "Verkäufer übernehmen vollständig – starkes Umkehrsignal"
+
+        elif is_bull and not prev_bull and c["o"] < prev["c"] and c["c"] > (prev["o"] + prev["c"]) / 2:
+            name, sig = "Piercing Line", "bullish"
+            desc = "Bullisches Umkehrmuster: Kurs schließt über Mitte der Vorkerze"
+
+        elif not is_bull and prev_bull and c["o"] > prev["c"] and c["c"] < (prev["o"] + prev["c"]) / 2:
+            name, sig = "Dark Cloud Cover", "bearish"
+            desc = "Bearisches Muster: Kurs schließt unter Mitte der Vorkerze"
+
+        if name:
+            patterns.append({"index": i, "name": name, "signal": sig, "desc": desc})
+
+    # ── Three-candle patterns ──────────────────────────────────────────
+    for i in range(max(2, n - 10), n):
+        c0, c1, c2 = candles[i - 2], candles[i - 1], candles[i]
+        b0 = abs(c0["c"] - c0["o"])
+        b1 = abs(c1["c"] - c1["o"])
+        b2 = abs(c2["c"] - c2["o"])
+
+        # Morning Star: bearish → small → bullish closing above midpoint of c0
+        if (c0["c"] < c0["o"] and b1 < b0 * 0.4
+                and c2["c"] > c2["o"] and c2["c"] > (c0["o"] + c0["c"]) / 2):
+            patterns.append({
+                "index": i, "name": "Morning Star", "signal": "bullish",
+                "desc": "Starkes 3-Kerzen-Umkehrsignal nach oben",
+            })
+
+        # Evening Star: bullish → small → bearish closing below midpoint of c0
+        elif (c0["c"] > c0["o"] and b1 < b0 * 0.4
+              and c2["c"] < c2["o"] and c2["c"] < (c0["o"] + c0["c"]) / 2):
+            patterns.append({
+                "index": i, "name": "Evening Star", "signal": "bearish",
+                "desc": "Starkes 3-Kerzen-Umkehrsignal nach unten",
+            })
+
+        # Three White Soldiers: three consecutive rising bullish candles
+        elif all(candles[i - k]["c"] > candles[i - k]["o"] for k in range(3)):
+            if (c2["c"] > c1["c"] > c0["c"]
+                    and c1["o"] > c0["o"] and c2["o"] > c1["o"]):
+                patterns.append({
+                    "index": i, "name": "3 Weiße Soldaten", "signal": "bullish",
+                    "desc": "Drei starke Aufwärtskerzen – anhaltender Trend",
+                })
+
+        # Three Black Crows: three consecutive falling bearish candles
+        elif all(candles[i - k]["c"] < candles[i - k]["o"] for k in range(3)):
+            if (c2["c"] < c1["c"] < c0["c"]
+                    and c1["o"] < c0["o"] and c2["o"] < c1["o"]):
+                patterns.append({
+                    "index": i, "name": "3 Schwarze Raben", "signal": "bearish",
+                    "desc": "Drei starke Abwärtskerzen – anhaltender Abwärtstrend",
+                })
+
+    # Deduplicate by index (keep last match per candle)
+    seen = {}
+    for p in patterns:
+        seen[p["index"]] = p
+    return list(seen.values())
+
+
+# ── Trend Prediction ───────────────────────────────────────────────────────────
+def predict_trend(candles: list, patterns: list, rsi: float, sma5: float, sma20: float) -> dict:
+    if not candles:
+        return {"direction": "neutral", "confidence": 50, "desc": "Keine Daten"}
+
+    score = 0
+    max_score = 0
+
+    # Pattern signals – recent patterns weighted more
+    for p in patterns:
+        age_weight = 3 if p["index"] >= len(candles) - 3 else 2
+        max_score += age_weight
+        if p["signal"] == "bullish":
+            score += age_weight
+        elif p["signal"] == "bearish":
+            score -= age_weight
+
+    # RSI
+    max_score += 2
+    if   rsi < 30: score += 2
+    elif rsi < 45: score += 1
+    elif rsi > 70: score -= 2
+    elif rsi > 60: score -= 1
+
+    # SMA crossover (price vs SMA20)
+    last_close = candles[-1]["c"]
+    max_score += 2
+    if   sma5 > sma20 * 1.001: score += 2
+    elif sma5 < sma20 * 0.999: score -= 2
+    else:
+        score += 1 if last_close > sma20 else -1
+
+    # Recent candle momentum (last 5 candles)
+    recent = candles[-5:]
+    bull_count = sum(1 for c in recent if c["c"] >= c["o"])
+    max_score += 2
+    if   bull_count >= 4: score += 2
+    elif bull_count == 3: score += 1
+    elif bull_count == 1: score -= 2
+    elif bull_count == 0: score -= 2
+    else:                 score -= 1
+
+    # Volume trend (rising volume with price move = stronger signal)
+    vols = [c["v"] for c in candles[-5:] if c["v"] > 0]
+    if len(vols) >= 3:
+        vol_trend = vols[-1] > sum(vols[:-1]) / len(vols[:-1])
+        max_score += 1
+        score += 1 if (vol_trend and bull_count >= 3) else -1 if (vol_trend and bull_count <= 1) else 0
+
+    # Normalise to 0-100
+    confidence = int(50 + (score / max(max_score, 1)) * 50)
+    confidence = max(10, min(92, confidence))
+
+    if confidence >= 63:
+        direction = "bullish"
+        desc = f"Aufwärtstrend wahrscheinlich – {confidence}% Konfidenz"
+    elif confidence <= 37:
+        direction = "bearish"
+        desc = f"Abwärtstrend wahrscheinlich – {100 - confidence}% Konfidenz"
+    else:
+        direction = "neutral"
+        desc = f"Seitwärtsbewegung erwartet – unklares Signal"
+
+    return {"direction": direction, "confidence": confidence, "desc": desc}
+
+
 # ── Routes ─────────────────────────────────────────────────────────────────────
 @app.route("/")
 def index():
     return render_template("index.html")
+
+
+@app.route("/api/candles/<market>/<path:symbol>")
+def api_candles(market, symbol):
+    if market == "crypto":
+        candles = fetch_ohlcv_crypto(symbol)
+    else:
+        candles = fetch_ohlcv_yahoo(symbol)
+
+    if not candles:
+        return jsonify({"error": "No OHLCV data"}), 404
+
+    # Use last 35 candles for display (we show 30 + some context for patterns)
+    display = candles[-35:]
+    patterns = detect_patterns(display)
+
+    closes = [c["c"] for c in display]
+    rec    = calc_recommendation(closes, closes[-1] if closes else 0)
+
+    # SMA20 for overlay
+    sma20_line = [
+        round(sum(closes[max(0, i - 19): i + 1]) / min(20, i + 1), 6)
+        for i in range(len(closes))
+    ]
+
+    prediction = predict_trend(
+        display, patterns,
+        rec.get("rsi", 50), rec.get("sma5", closes[-1]), rec.get("sma20", closes[-1])
+    )
+
+    return jsonify({
+        "candles":    display,
+        "patterns":   patterns,
+        "prediction": prediction,
+        "sma20":      sma20_line,
+    })
 
 
 @app.route("/api/tops/<market>")

@@ -436,6 +436,76 @@
       margin-bottom: 14px;
     }
 
+    /* candle chart loading placeholder */
+    .candle-loading {
+      display: flex; align-items: center; gap: 8px;
+      padding: 20px 0; color: var(--muted); font-size: 12px;
+    }
+    .spin-sm {
+      width: 14px; height: 14px;
+      border: 2px solid var(--border);
+      border-top-color: var(--accent);
+      border-radius: 50%;
+      animation: rot .75s linear infinite;
+    }
+
+    /* candlestick section */
+    .candle-section { margin-bottom: 14px; }
+    .candle-lbl {
+      font-size: 11px; color: var(--muted);
+      margin-bottom: 6px;
+      display: flex; align-items: center; gap: 6px;
+    }
+    .candle-lbl span { color: var(--accent); font-weight: 600; }
+
+    /* pattern list */
+    .pattern-list { display: flex; flex-direction: column; gap: 6px; margin-bottom: 12px; }
+    .pattern-item {
+      display: flex; align-items: flex-start; gap: 8px;
+      background: var(--card); border: 1px solid var(--border);
+      border-radius: 8px; padding: 8px 10px;
+    }
+    .pat-badge {
+      font-size: 10px; font-weight: 700; padding: 2px 7px;
+      border-radius: 4px; white-space: nowrap; flex-shrink: 0; margin-top: 1px;
+    }
+    .pat-bull  { background: var(--up-bg);   color: var(--up);   border: 1px solid var(--up); }
+    .pat-bear  { background: var(--down-bg); color: var(--down); border: 1px solid var(--down); }
+    .pat-neut  { background: rgba(255,215,64,.1); color: #ffd740; border: 1px solid #ffd740; }
+    .pat-name  { font-size: 12px; font-weight: 700; margin-bottom: 2px; }
+    .pat-desc  { font-size: 11px; color: var(--muted); line-height: 1.4; }
+
+    /* prediction bar */
+    .pred-box {
+      background: var(--card); border: 1px solid var(--border);
+      border-radius: 9px; padding: 12px 14px; margin-bottom: 14px;
+    }
+    .pred-hd { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }
+    .pred-title { font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: .5px; color: var(--muted); }
+    .pred-dir { font-size: 14px; font-weight: 800; }
+    .pred-dir.bullish { color: var(--up); }
+    .pred-dir.bearish { color: var(--down); }
+    .pred-dir.neutral { color: #ffd740; }
+    .pred-desc { font-size: 12px; color: var(--muted); margin-bottom: 10px; }
+    .pred-track {
+      height: 8px; border-radius: 4px;
+      background: linear-gradient(to right, var(--down), #444, var(--up));
+      position: relative;
+    }
+    .pred-marker {
+      position: absolute; top: -3px;
+      width: 14px; height: 14px;
+      border-radius: 50%;
+      background: white;
+      border: 2px solid var(--border);
+      transform: translateX(-50%);
+      box-shadow: 0 0 6px rgba(0,0,0,.5);
+    }
+    .pred-labels {
+      display: flex; justify-content: space-between;
+      font-size: 10px; color: var(--muted); margin-top: 4px;
+    }
+
     /* news */
     .news-hd { font-size: 11px; font-weight: 700; color: var(--muted); text-transform: uppercase; letter-spacing: .6px; margin-bottom: 10px; }
     .news-item { padding: 9px 0; border-bottom: 1px solid var(--border); }
@@ -771,10 +841,12 @@ function renderDetail(a) {
         </div>`).join('')}
     </div>
 
-    <!-- Chart -->
-    <div class="chart-wrap">
-      <div class="chart-lbl">Kursverlauf (30 Tage)</div>
-      ${mainChart(a.sparkline)}
+    <!-- Candlestick Chart (loaded async) -->
+    <div class="candle-section" id="candleSection">
+      <div class="candle-lbl">Kerzen-Chart <span>(30 Tage + Prognose)</span></div>
+      <div id="candleChartWrap">
+        <div class="candle-loading"><div class="spin-sm"></div> Kerzen-Chart wird geladen…</div>
+      </div>
     </div>
 
     <!-- Info Grid -->
@@ -853,6 +925,175 @@ async function loadTops(skeleton = true) {
   }
 }
 
+/* ── Candlestick Chart SVG ──────────────────────────────────────── */
+function candlestickChart(candles, patterns = [], prediction = null, sma20 = []) {
+  if (!candles || candles.length < 3) return '<div style="color:var(--muted);font-size:12px;padding:10px 0">Nicht genug Kerzen-Daten</div>';
+
+  const W = 360, H = 170;
+  const pL = 4, pR = 38, pT = 10, pB = 16;
+  const cw = W - pL - pR, ch = H - pT - pB;
+
+  // Include 3 ghost slots for prediction
+  const GHOST = prediction ? 3 : 0;
+  const totalSlots = candles.length + GHOST;
+  const slotW = cw / totalSlots;
+  const bodyW = Math.max(1.5, slotW * 0.58);
+
+  const allL = candles.map(c => c.l);
+  const allH = candles.map(c => c.h);
+  const minP  = Math.min(...allL) * 0.9985;
+  const maxP  = Math.max(...allH) * 1.0015;
+  const rng   = maxP - minP || 1;
+
+  const px = i => pL + (i + 0.5) * slotW;
+  const py = p => pT + ch - ((p - minP) / rng) * ch;
+
+  // Pattern lookup
+  const patMap = {};
+  patterns.forEach(p => { patMap[p.index] = p; });
+
+  let svg = `<svg viewBox="0 0 ${W} ${H}" xmlns="http://www.w3.org/2000/svg" style="width:100%;height:${H}px;display:block">`;
+
+  // Horizontal grid + price labels
+  [0.2, 0.5, 0.8].forEach(f => {
+    const y = (pT + ch * (1 - f)).toFixed(1);
+    const price = minP + f * rng;
+    const label = price < 1 ? price.toFixed(4) : price < 100 ? price.toFixed(2) : Math.round(price).toLocaleString('de-DE');
+    svg += `<line x1="${pL}" y1="${y}" x2="${W - pR}" y2="${y}" stroke="rgba(255,255,255,.04)" stroke-width="1"/>`;
+    svg += `<text x="${W - pR + 3}" y="${(+y + 3.5).toFixed(1)}" font-size="7.5" fill="#505070" font-family="monospace">${label}</text>`;
+  });
+
+  // SMA20 overlay
+  if (sma20.length === candles.length) {
+    const smaPoints = sma20.map((v, i) => `${px(i).toFixed(1)},${py(v).toFixed(1)}`).join(' ');
+    svg += `<polyline points="${smaPoints}" fill="none" stroke="#448aff" stroke-width="1.2" stroke-opacity=".55" stroke-dasharray="3 2" stroke-linejoin="round"/>`;
+  }
+
+  // Historical candles
+  candles.forEach((c, i) => {
+    const bull  = c.c >= c.o;
+    const color = bull ? '#00e676' : '#ff3d57';
+    const x     = px(i);
+    const bTop  = py(Math.max(c.o, c.c));
+    const bBot  = py(Math.min(c.o, c.c));
+    const bH    = Math.max(1, bBot - bTop);
+
+    // Wick
+    svg += `<line x1="${x.toFixed(1)}" y1="${py(c.h).toFixed(1)}" x2="${x.toFixed(1)}" y2="${py(c.l).toFixed(1)}" stroke="${color}" stroke-width="1" stroke-opacity=".75"/>`;
+    // Body
+    svg += `<rect x="${(x - bodyW / 2).toFixed(1)}" y="${bTop.toFixed(1)}" width="${bodyW.toFixed(1)}" height="${bH.toFixed(1)}" fill="${color}" fill-opacity="${bull ? '.85' : '.75'}" rx=".5"/>`;
+
+    // Pattern marker
+    const pat = patMap[i];
+    if (pat) {
+      const mc  = pat.signal === 'bullish' ? '#00e676' : pat.signal === 'bearish' ? '#ff3d57' : '#ffd740';
+      if (pat.signal === 'bullish') {
+        const my = py(c.l) + 6;
+        svg += `<polygon points="${x.toFixed(1)},${(my - 5).toFixed(1)} ${(x - 4).toFixed(1)},${(my + 1).toFixed(1)} ${(x + 4).toFixed(1)},${(my + 1).toFixed(1)}" fill="${mc}"/>`;
+      } else if (pat.signal === 'bearish') {
+        const my = py(c.h) - 6;
+        svg += `<polygon points="${x.toFixed(1)},${(my + 5).toFixed(1)} ${(x - 4).toFixed(1)},${(my - 1).toFixed(1)} ${(x + 4).toFixed(1)},${(my - 1).toFixed(1)}" fill="${mc}"/>`;
+      } else {
+        svg += `<circle cx="${x.toFixed(1)}" cy="${(py(c.h) - 5).toFixed(1)}" r="3" fill="${mc}" fill-opacity=".8"/>`;
+      }
+    }
+  });
+
+  // Prediction ghost candles
+  if (prediction && GHOST > 0) {
+    const n       = candles.length;
+    const sepX    = (pL + n * slotW).toFixed(1);
+    svg += `<line x1="${sepX}" y1="${pT}" x2="${sepX}" y2="${pT + ch}" stroke="rgba(255,255,255,.12)" stroke-width="1" stroke-dasharray="3 3"/>`;
+    svg += `<text x="${(+sepX + 3).toFixed(1)}" y="${(pT + 9).toFixed(1)}" font-size="7" fill="#505070">Prognose</text>`;
+
+    const avgBody = candles.slice(-8).reduce((s, c) => s + Math.abs(c.c - c.o), 0) / 8;
+    const avgWick = candles.slice(-8).reduce((s, c) => s + (c.h - c.l), 0) / 8;
+    const dirMult = prediction.direction === 'bullish' ? 1 : prediction.direction === 'bearish' ? -1 : 0;
+    const momentum = Math.abs(prediction.confidence - 50) / 100;
+    const gc = prediction.direction === 'neutral' ? '#ffd740' : prediction.direction === 'bullish' ? '#00e676' : '#ff3d57';
+
+    let pClose = candles[n - 1].c;
+    for (let j = 0; j < GHOST; j++) {
+      const drift  = pClose * 0.006 * dirMult * (1 + momentum);
+      const noise  = pClose * 0.002;
+      const gOpen  = pClose;
+      const gClose = gOpen + drift;
+      const gHigh  = Math.max(gOpen, gClose) + avgWick * 0.25;
+      const gLow   = Math.min(gOpen, gClose) - avgWick * 0.25;
+      const gbTop  = py(Math.max(gOpen, gClose));
+      const gbBot  = py(Math.min(gOpen, gClose));
+      const gbH    = Math.max(1, gbBot - gbTop);
+      const gx     = px(n + j);
+
+      svg += `<line x1="${gx.toFixed(1)}" y1="${py(gHigh).toFixed(1)}" x2="${gx.toFixed(1)}" y2="${py(gLow).toFixed(1)}" stroke="${gc}" stroke-width="1" stroke-opacity=".3" stroke-dasharray="2 2"/>`;
+      svg += `<rect x="${(gx - bodyW / 2).toFixed(1)}" y="${gbTop.toFixed(1)}" width="${bodyW.toFixed(1)}" height="${gbH.toFixed(1)}" fill="${gc}" fill-opacity=".15" stroke="${gc}" stroke-width=".8" stroke-opacity=".4" stroke-dasharray="2 2" rx=".5"/>`;
+      pClose = gClose;
+    }
+
+    // SMA20 legend pill
+    svg += `<rect x="${pL}" y="${pT + 1}" width="46" height="11" rx="5" fill="rgba(68,138,255,.12)"/>`;
+    svg += `<text x="${pL + 5}" y="${pT + 9}" font-size="7.5" fill="#448aff">── SMA 20</text>`;
+  }
+
+  svg += '</svg>';
+  return svg;
+}
+
+/* ── Pattern + Prediction HTML ──────────────────────────────────── */
+function renderCandleAnalysis(data) {
+  const { patterns = [], prediction = {} } = data;
+  const dir   = prediction.direction || 'neutral';
+  const conf  = prediction.confidence || 50;
+  const pct   = dir === 'bullish' ? conf : dir === 'bearish' ? 100 - conf : 50;
+  const dirLabel = dir === 'bullish' ? 'AUFWÄRTS' : dir === 'bearish' ? 'ABWÄRTS' : 'SEITWÄRTS';
+
+  const patHtml = patterns.length
+    ? `<div class="pattern-list">
+        ${patterns.slice(-5).reverse().map(p => {
+          const bc = p.signal === 'bullish' ? 'pat-bull' : p.signal === 'bearish' ? 'pat-bear' : 'pat-neut';
+          const lbl = p.signal === 'bullish' ? 'BULL' : p.signal === 'bearish' ? 'BEAR' : 'NEUT';
+          return `<div class="pattern-item">
+            <div class="pat-badge ${bc}">${lbl}</div>
+            <div>
+              <div class="pat-name">${p.name}</div>
+              <div class="pat-desc">${p.desc}</div>
+            </div>
+          </div>`;
+        }).join('')}
+      </div>`
+    : `<div style="font-size:12px;color:var(--muted);margin-bottom:10px">Keine markanten Muster in den letzten Kerzen erkannt</div>`;
+
+  return `
+    ${patHtml}
+    <div class="pred-box">
+      <div class="pred-hd">
+        <div class="pred-title">Trend-Prognose</div>
+        <div class="pred-dir ${dir}">${dirLabel}</div>
+      </div>
+      <div class="pred-desc">${prediction.desc || '–'}</div>
+      <div class="pred-track">
+        <div class="pred-marker" style="left:${pct}%"></div>
+      </div>
+      <div class="pred-labels"><span style="color:var(--down)">Abwärts</span><span>Neutral</span><span style="color:var(--up)">Aufwärts</span></div>
+    </div>`;
+}
+
+/* ── Load Candles (async after detail) ──────────────────────────── */
+async function loadCandles(id, market) {
+  const wrap = document.getElementById('candleChartWrap');
+  if (!wrap) return;
+  try {
+    const res  = await fetch(`/api/candles/${market}/${id}`);
+    const data = await res.json();
+    if (data.error) throw new Error(data.error);
+    wrap.innerHTML =
+      candlestickChart(data.candles, data.patterns, data.prediction, data.sma20) +
+      renderCandleAnalysis(data);
+  } catch {
+    wrap.innerHTML = '<div style="font-size:12px;color:var(--muted);padding:8px 0">Chart nicht verfügbar</div>';
+  }
+}
+
 /* ── Select Asset ───────────────────────────────────────────────── */
 async function selectAsset(id, market) {
   S.selected = id;
@@ -866,6 +1107,7 @@ async function selectAsset(id, market) {
     const data = await res.json();
     if (data.error) throw new Error(data.error);
     renderDetail(data);
+    loadCandles(id, market);   // load candle chart async (non-blocking)
   } catch (e) {
     $panel.innerHTML = `<div class="err">Fehler: ${e.message}</div>`;
   }
