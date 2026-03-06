@@ -55,6 +55,26 @@ CRYPTO_DEFAULT = [
     "ripple", "cardano", "dogecoin", "avalanche-2",
 ]
 
+CRYPTO_TOP10_IDS = [
+    "bitcoin", "ethereum", "solana", "binancecoin", "ripple",
+    "cardano", "dogecoin", "avalanche-2", "polkadot", "chainlink",
+    "litecoin", "shiba-inu", "uniswap", "stellar", "monero",
+]
+
+TOP10_CANDIDATES = {
+    "stocks": [
+        "AAPL", "MSFT", "NVDA", "GOOGL", "AMZN", "TSLA", "META", "JPM",
+        "V", "MA", "NFLX", "AMD", "INTC", "CRM", "ADBE", "ORCL", "SHOP", "UBER",
+    ],
+    "etfs": [
+        "SPY", "QQQ", "VTI", "IWM", "GLD", "TLT", "ARKK", "XLF",
+        "VNQ", "EEM", "HYG", "XLE", "XLK", "SOXX", "VGT", "SCHD",
+    ],
+    "commodities": [
+        "GC=F", "SI=F", "CL=F", "NG=F", "HG=F", "ZW=F", "ZC=F", "BZ=F", "PL=F", "PA=F",
+    ],
+}
+
 
 # ── Helpers ────────────────────────────────────────────────────────────────────
 def pct(new_val, old_val):
@@ -779,13 +799,33 @@ def api_candles(market, symbol):
 
 @app.route("/api/tops/<market>")
 def api_tops(market):
+    symbols_param = request.args.get("symbols", "").strip()
     if market == "crypto":
-        return jsonify(coingecko_tops())
-    syms = MARKET_SYMBOLS.get(market)
+        ids = [s.strip() for s in symbols_param.split(",") if s.strip()] if symbols_param else None
+        return jsonify(coingecko_tops(ids))
+    custom = [s.strip() for s in symbols_param.split(",") if s.strip()]
+    syms = custom or MARKET_SYMBOLS.get(market)
     if not syms:
         return jsonify({"error": "Unbekannter Markt"}), 400
     results = [q for s in syms if (q := yahoo_quote(s))]
     return jsonify(results)
+
+
+@app.route("/api/top10/<market>")
+def api_top10(market):
+    cache_key = f"top10_{market}"
+    cached = cache_get(cache_key, ttl=180)
+    if cached:
+        return jsonify(cached)
+    if market == "crypto":
+        data = coingecko_tops(CRYPTO_TOP10_IDS)
+        top = sorted(data, key=lambda x: x.get("change_24h", 0), reverse=True)[:10]
+    else:
+        candidates = TOP10_CANDIDATES.get(market, MARKET_SYMBOLS.get(market, []))
+        results = [q for s in candidates if (q := yahoo_quote(s))]
+        top = sorted(results, key=lambda x: x.get("change_24h", 0), reverse=True)[:10]
+    cache_set(cache_key, top)
+    return jsonify(top)
 
 
 @app.route("/api/detail/<market>/<path:symbol>")

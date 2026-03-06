@@ -194,6 +194,54 @@
     /* ── Left: Tops ────────────────────────────────────────── */
     .tops-section { padding: 20px 24px; overflow-y: auto; }
 
+    .tops-hd {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      margin-bottom: 14px;
+    }
+    .tops-hd-left { display: flex; align-items: center; gap: 8px; }
+    .tops-hd-left h2 { font-size: 15px; font-weight: 700; }
+    .tops-actions { display: flex; gap: 6px; }
+    .btn-sm {
+      font-size: 11px; font-weight: 600;
+      padding: 4px 10px; border-radius: 6px;
+      border: 1px solid var(--border);
+      background: var(--card); color: var(--text);
+      cursor: pointer; white-space: nowrap;
+      transition: background .15s, border-color .15s, color .15s;
+    }
+    .btn-sm:hover { background: var(--card-h); border-color: var(--accent); color: var(--accent); }
+    .btn-sm.btn-accent { background: var(--accent-bg); border-color: var(--accent); color: var(--accent); }
+    .btn-sm.btn-dim { color: var(--muted); }
+    .btn-sm:disabled { opacity: .45; cursor: default; pointer-events: none; }
+
+    /* card remove button */
+    .card { position: relative; }
+    .card-rm {
+      position: absolute; top: 7px; right: 7px;
+      width: 18px; height: 18px; border-radius: 50%;
+      border: none; background: rgba(255,61,87,.15); color: var(--down);
+      font-size: 13px; line-height: 1; cursor: pointer;
+      display: flex; align-items: center; justify-content: center;
+      opacity: 0; transition: opacity .15s; z-index: 2; padding: 0;
+    }
+    .card:hover .card-rm { opacity: 1; }
+
+    /* watchlist button in detail */
+    .wl-btn {
+      font-size: 12px; font-weight: 600;
+      padding: 5px 12px; border-radius: 8px;
+      border: 1px solid var(--border);
+      background: var(--card); color: var(--muted);
+      cursor: pointer; flex-shrink: 0;
+      transition: all .15s; margin-left: auto;
+    }
+    .wl-btn:hover { border-color: var(--accent); color: var(--accent); }
+    .wl-btn.active { background: var(--accent-bg); border-color: var(--accent); color: var(--accent); }
+
+    /* sec-hd kept for compat */
     .sec-hd {
       display: flex;
       align-items: center;
@@ -614,9 +662,12 @@
 
   <!-- Left: Top Performers -->
   <div class="tops-section">
-    <div class="sec-hd">
-      <h2>Top Performer</h2>
-      <span class="live-badge">LIVE</span>
+    <div class="tops-hd">
+      <div class="tops-hd-left">
+        <h2 id="topsTitle">Top Performer</h2>
+        <span class="live-badge">LIVE</span>
+      </div>
+      <div class="tops-actions" id="topsActions"></div>
     </div>
     <div id="topsGrid" class="tops-grid"></div>
   </div>
@@ -644,12 +695,119 @@
 const S = { market: 'stocks', selected: null, countdown: 60, timer: null };
 
 /* ── DOM ────────────────────────────────────────────────────────── */
-const $grid   = document.getElementById('topsGrid');
-const $panel  = document.getElementById('detail');
-const $inp    = document.getElementById('searchInput');
-const $drop   = document.getElementById('searchDrop');
-const $cd     = document.getElementById('countdown');
-const $banner = document.getElementById('demoBanner');
+const $grid    = document.getElementById('topsGrid');
+const $panel   = document.getElementById('detail');
+const $inp     = document.getElementById('searchInput');
+const $drop    = document.getElementById('searchDrop');
+const $cd      = document.getElementById('countdown');
+const $banner  = document.getElementById('demoBanner');
+const $topsAct = document.getElementById('topsActions');
+const $topsTtl = document.getElementById('topsTitle');
+
+/* ── Watchlist (localStorage) ───────────────────────────────────── */
+const WL_KEY = 'mt_watchlist_v1';
+
+function getWL() {
+  try { return JSON.parse(localStorage.getItem(WL_KEY) || '{}'); } catch { return {}; }
+}
+function setWL(wl) { localStorage.setItem(WL_KEY, JSON.stringify(wl)); }
+function getMktWL(mkt) { return getWL()[mkt] || []; }
+function isInWL(id, mkt) { return getMktWL(mkt).includes(String(id)); }
+
+function addToWL(id, mkt) {
+  const wl = getWL();
+  if (!wl[mkt]) wl[mkt] = [];
+  if (!wl[mkt].includes(String(id))) { wl[mkt].push(String(id)); setWL(wl); }
+}
+function removeFromWL(id, mkt) {
+  const wl = getWL();
+  if (wl[mkt]) { wl[mkt] = wl[mkt].filter(x => x !== String(id)); setWL(wl); }
+}
+function clearMktWL(mkt) {
+  const wl = getWL(); wl[mkt] = []; setWL(wl);
+}
+
+/* ── Tops Header ────────────────────────────────────────────────── */
+function updateTopsHeader() {
+  const wl = getMktWL(S.market);
+  if (wl.length > 0) {
+    $topsTtl.textContent = `Watchlist (${wl.length})`;
+    $topsAct.innerHTML = `
+      <button class="btn-sm btn-accent" onclick="loadAutoTop10()">⚡ Top 10</button>
+      <button class="btn-sm btn-dim"    onclick="clearWatchlistAndReload()">✕ Leeren</button>`;
+  } else {
+    $topsTtl.textContent = 'Top Performer';
+    $topsAct.innerHTML = `
+      <button class="btn-sm btn-accent" onclick="loadAutoTop10()">⚡ Top 10 laden</button>`;
+  }
+}
+
+/* ── Remove card from watchlist ─────────────────────────────────── */
+function rmCard(e, id, mkt) {
+  e.stopPropagation();
+  const wl = getWL();
+  if (!wl[mkt] || wl[mkt].length === 0) {
+    // first removal: seed watchlist from current cards minus this one
+    const ids = Array.from(document.querySelectorAll('.card')).map(c => c.dataset.id);
+    wl[mkt] = ids.filter(x => x !== String(id));
+  } else {
+    wl[mkt] = wl[mkt].filter(x => x !== String(id));
+  }
+  setWL(wl);
+  document.querySelector(`.card[data-id="${id}"]`)?.remove();
+  if (S.selected === String(id)) {
+    S.selected = null;
+    $panel.innerHTML = `<div class="d-empty"><p>Wähle einen Wert aus der Liste</p></div>`;
+  }
+  updateTopsHeader();
+  if ((wl[mkt] || []).length === 0) loadTops(false);
+}
+
+/* ── Toggle watchlist membership from detail panel ─────────────── */
+function toggleWL(id, mkt) {
+  if (isInWL(id, mkt)) {
+    removeFromWL(id, mkt);
+  } else {
+    addToWL(id, mkt);
+    loadTops(false);
+  }
+  const btn = document.getElementById('wlBtn');
+  if (btn) {
+    const now = isInWL(id, mkt);
+    btn.className = `wl-btn${now ? ' active' : ''}`;
+    btn.textContent = now ? '✓ Watchlist' : '+ Watchlist';
+  }
+  updateTopsHeader();
+}
+
+/* ── Auto-load top 10 by performance ───────────────────────────── */
+async function loadAutoTop10() {
+  // Disable button while loading
+  $topsAct.querySelectorAll('button').forEach(b => b.disabled = true);
+  $grid.innerHTML = `<div class="spinner-wrap" style="grid-column:1/-1">
+    <div class="spin"></div> Lade Top 10…</div>`;
+  try {
+    const res  = await fetch(`/api/top10/${S.market}`);
+    const data = await res.json();
+    if (!Array.isArray(data) || !data.length) throw new Error('Keine Daten');
+    const wl = getWL();
+    wl[S.market] = data.map(a => String(a.id || a.symbol));
+    setWL(wl);
+    $grid.innerHTML = data.map(renderCard).join('');
+    if (data.some(a => a._demo)) $banner.classList.remove('hidden');
+    else $banner.classList.add('hidden');
+  } catch (e) {
+    $grid.innerHTML = `<div class="err">Fehler: ${e.message}</div>`;
+  }
+  updateTopsHeader();
+}
+
+/* ── Clear watchlist and reload defaults ────────────────────────── */
+function clearWatchlistAndReload() {
+  clearMktWL(S.market);
+  updateTopsHeader();
+  loadTops(false);
+}
 
 /* ── Format helpers ─────────────────────────────────────────────── */
 function fmtPrice(n, cur = 'EUR') {
@@ -772,6 +930,7 @@ function renderCard(a) {
   return `<div class="card ${isUp ? 'up' : 'down'} ${sel}"
                data-id="${id}"
                onclick="selectAsset('${id}','${S.market}')">
+    <button class="card-rm" onclick="rmCard(event,'${id}','${S.market}')" title="Entfernen">×</button>
     <div class="card-top">
       <div>
         <div class="card-sym">${a.symbol}</div>
@@ -823,6 +982,11 @@ function renderDetail(a) {
         <h3>${a.name}</h3>
         <p>${a.symbol}${a.exchange ? ' &middot; ' + a.exchange : ''}</p>
       </div>
+      <button class="wl-btn${isInWL(a.id || a.symbol, S.market) ? ' active' : ''}"
+              id="wlBtn"
+              onclick="toggleWL('${a.id || a.symbol}','${S.market}')">
+        ${isInWL(a.id || a.symbol, S.market) ? '✓ Watchlist' : '+ Watchlist'}
+      </button>
     </div>
 
     <!-- Price -->
@@ -907,8 +1071,13 @@ function renderDetail(a) {
 /* ── Load Tops ──────────────────────────────────────────────────── */
 async function loadTops(skeleton = true) {
   if (skeleton) renderSkeletons();
+  updateTopsHeader();
   try {
-    const res  = await fetch(`/api/tops/${S.market}`);
+    const wl  = getMktWL(S.market);
+    const url = wl.length
+      ? `/api/tops/${S.market}?symbols=${encodeURIComponent(wl.join(','))}`
+      : `/api/tops/${S.market}`;
+    const res  = await fetch(url);
     const data = await res.json();
     if (!Array.isArray(data) || !data.length) {
       $grid.innerHTML = '<div class="err">Keine Daten verfügbar</div>';
